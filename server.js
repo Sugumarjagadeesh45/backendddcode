@@ -52,6 +52,8 @@ socket.init(server);
 app.set('io', socket.getIO());
 
 const PORT = process.env.PORT || 5001;
-server.listen(process.env.PORT || 5001, "0.0.0.0", () => {
-  console.log(`✅ Server running on port ${process.env.PORT || 5001}`);
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📁 Uploads available at http://localhost:${PORT}/uploads/`);
 });
