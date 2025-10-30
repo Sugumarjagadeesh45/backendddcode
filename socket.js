@@ -1,3 +1,4 @@
+// D:\app\dummbackend-main\dummbackend-main\socket.js
 const { Server } = require("socket.io");
 const DriverLocation = require("./models/DriverLocation");
 const Driver = require("./models/driver/driver");
@@ -211,6 +212,46 @@ function broadcastDriverLocationsToAllUsers() {
  
   io.emit("driverLocationsUpdate", { drivers });
 }
+
+// NEW: Function to send FCM notifications to offline drivers
+const sendRideRequestToOfflineDrivers = async (rideData) => {
+  try {
+    console.log('📢 Sending FCM notifications to offline drivers...');
+    
+    // Get all drivers (including offline ones) from database
+    const Driver = require('./models/driver/driver');
+    const allDrivers = await Driver.find({ 
+      isActive: true,
+      fcmToken: { $exists: true, $ne: null }
+    });
+    
+    const driverTokens = allDrivers.map(driver => driver.fcmToken).filter(token => token);
+    
+    if (driverTokens.length > 0) {
+      await sendNotificationToMultipleDrivers(
+        driverTokens,
+        "🚖 New Ride Request!",
+        `Pickup: ${rideData.pickup?.address || 'Selected Location'}`,
+        {
+          type: "ride_request",
+          rideId: rideData.rideId,
+          pickup: JSON.stringify(rideData.pickup),
+          drop: JSON.stringify(rideData.drop),
+          fare: rideData.fare?.toString() || "0",
+          distance: rideData.distance || "0 km",
+          vehicleType: rideData.vehicleType || "taxi",
+          timestamp: new Date().toISOString(),
+          priority: "high"
+        }
+      );
+      console.log(`📢 FCM notifications sent to ${driverTokens.length} drivers`);
+    } else {
+      console.log('ℹ️ No drivers with FCM tokens found');
+    }
+  } catch (error) {
+    console.error('❌ Error sending FCM notifications:', error);
+  }
+};
 
 const init = (server) => {
   io = new Server(server, {
@@ -568,11 +609,20 @@ const init = (server) => {
         // Save initial user location to database
         await saveUserLocationToDB(userId, pickup.lat, pickup.lng, rideId);
 
-        // Broadcast to all drivers
+        // Broadcast to all drivers via socket
         io.emit("newRideRequest", {
           ...data,
           rideId: rideId,
           _id: savedRide._id.toString()
+        });
+
+        // NEW: Send FCM notifications to offline drivers
+        sendRideRequestToOfflineDrivers({
+          ...data,
+          rideId: rideId,
+          fare: finalPrice
+        }).catch(error => {
+          console.error('❌ Error sending FCM notifications:', error);
         });
 
         // Send success response with backend-generated rideId
@@ -586,7 +636,7 @@ const init = (server) => {
           });
         }
 
-        // Send notifications to nearby drivers
+        // Send notifications to nearby drivers via FCM
         const nearbyDrivers = Array.from(activeDriverSockets.values())
           .filter(driver => driver.isOnline && driver.status === "Live")
           .map(driver => driver.driverId);
@@ -1305,7 +1355,6 @@ const getIO = () => {
 };
 
 module.exports = { init, getIO, broadcastPricesToAllUsers };
-
 
 // const { Server } = require("socket.io");
 // const DriverLocation = require("./models/DriverLocation");
