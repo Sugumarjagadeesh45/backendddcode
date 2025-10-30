@@ -3,11 +3,54 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 
-// ================================
-// Direct In-Memory Status Routes
-// ================================
+const AdminUser = require('../models/adminUser');
+const jwt = require('jsonwebtoken');
 
-// Get current driver status
+
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    console.log('🔐 Login attempt:', { email, password });
+    
+    // Find admin user by username (using email as username)
+    const admin = await AdminUser.findOne({ username: email });
+    console.log('👤 Found admin:', admin ? 'Yes' : 'No');
+    
+    if (!admin) {
+      console.log('❌ Admin not found with username:', email);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Validate password
+    const isValidPassword = await admin.validatePassword(password);
+    console.log('🔑 Password valid:', isValidPassword);
+    
+    if (!isValidPassword) {
+      console.log('❌ Invalid password for admin:', email);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Generate token
+    const token = jwt.sign(
+      { id: admin._id, role: admin.role }, 
+      process.env.JWT_SECRET, 
+      { expiresIn: '24h' }
+    );
+
+    console.log('✅ Login successful for:', admin.username);
+    
+    res.json({
+      token,
+      role: admin.role,
+      message: 'Login successful'
+    });
+  } catch (err) {
+    console.error('❌ Admin login error:', err);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
 router.get('/driver-status', (req, res) => {
   try {
     const drivers = Array.from(activeDriverSockets.values()).map(driver => ({

@@ -5,12 +5,6 @@ const User = require('../models/User');
 const Driver = require('../models/driver/driver');
 const Ride = require('../models/ride');
 const GroceryItem = require('../models/groceryItem');
-
-
-
-
-
-
 exports.getDashboardData = async (req, res) => {
   try {
     const activeRiders = await Ride.countDocuments({ status: 'ongoing' }); // Riders with ongoing rides

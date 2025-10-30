@@ -3,6 +3,8 @@ const Driver = require("../../models/driver/driver");
 const Ride = require("../../models/ride");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { sendNotificationToDriver } = require("../../services/firebaseService");
+
 
 const SALT_ROUNDS = 12;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret";
@@ -45,12 +47,9 @@ const createDriver = async (req, res) => {
   }
 };
 
-/**
- * ✅ Driver login
- */
 const loginDriver = async (req, res) => {
   try {
-    const { driverId, password, latitude, longitude } = req.body;
+    const { driverId, password, latitude, longitude, fcmToken } = req.body;
     console.log(`🔑 Login attempt for driver: ${driverId}`);
 
     const driver = await Driver.findOne({ driverId });
@@ -65,7 +64,7 @@ const loginDriver = async (req, res) => {
       return res.status(401).json({ msg: "Invalid password" });
     }
 
-    // Update driver location and status
+    // Update driver location, status, and FCM token
     if (latitude && longitude) {
       driver.location = {
         type: "Point",
@@ -73,9 +72,16 @@ const loginDriver = async (req, res) => {
       };
       driver.status = "Live";
       driver.lastUpdate = new Date();
-      await driver.save();
-      console.log(`✅ Driver ${driverId} logged in at [${latitude}, ${longitude}]`);
     }
+
+    // Update FCM token if provided
+    if (fcmToken) {
+      driver.fcmToken = fcmToken;
+      console.log(`✅ Updated FCM token for driver: ${driverId}`);
+    }
+
+    await driver.save();
+    console.log(`✅ Driver ${driverId} logged in at [${latitude}, ${longitude}]`);
 
     const token = jwt.sign(
       { sub: driver._id, driverId: driver.driverId },
@@ -92,13 +98,75 @@ const loginDriver = async (req, res) => {
         status: driver.status,
         vehicleType: driver.vehicleType,
         location: driver.location,
+        fcmToken: driver.fcmToken,
       },
     });
   } catch (err) {
     console.error("❌ Error in loginDriver:", err);
     res.status(500).json({ error: err.message });
   }
+}
+
+
+
+const updateFCMToken = async (req, res) => {
+  try {
+    const { driverId } = req.user;
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({ msg: "FCM token is required" });
+    }
+
+    const driver = await Driver.findOneAndUpdate(
+      { driverId },
+      { fcmToken, lastUpdate: new Date() },
+      { new: true }
+    );
+
+    if (!driver) {
+      return res.status(404).json({ msg: "Driver not found" });
+    }
+
+    console.log(`✅ FCM token updated for driver: ${driverId}`);
+    res.json({ success: true, message: "FCM token updated successfully" });
+  } catch (err) {
+    console.error("❌ Error updating FCM token:", err);
+    res.status(500).json({ error: err.message });
+  }
 };
+
+
+
+
+const sendTestNotification = async (req, res) => {
+  try {
+    const { driverId } = req.user;
+
+    const success = await sendNotificationToDriver(
+      driverId,
+      "🔔 Test Notification",
+      "This is a test notification from EazyGo Driver App",
+      {
+        type: "test",
+        driverId: driverId,
+        timestamp: new Date().toISOString()
+      }
+    );
+
+    if (success) {
+      res.json({ success: true, message: "Test notification sent successfully" });
+    } else {
+      res.status(500).json({ success: false, message: "Failed to send test notification" });
+    }
+  } catch (err) {
+    console.error("❌ Error sending test notification:", err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+
+
 
 /**
  * ✅ Change password
@@ -353,7 +421,6 @@ const updateRideStatus = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
-
 module.exports = {
   createDriver,
   loginDriver,
@@ -366,4 +433,6 @@ module.exports = {
   getNearestDrivers,
   logoutDriver,
   getRideById,
+  updateFCMToken,        // ✅ Add this
+  sendTestNotification,  // ✅ Add this
 };

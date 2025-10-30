@@ -60,6 +60,14 @@ router.get("/verify", auth, async (req, res) => {
 
 router.use(auth);
 router.post("/update-location", driverController.updateLocation);
+
+
+router.post("/update-fcm-token", driverController.updateFCMToken);
+router.post("/test-notification", driverController.sendTestNotification);
+
+
+
+
 router.get("/nearby", async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
