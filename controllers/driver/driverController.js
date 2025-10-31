@@ -1,10 +1,9 @@
-// D:\newapp\fullbackend-main\fullbackend-main_\controllers\driver\driverController.js
+// D:\app\dummbackend-main\dummbackend-main\controllers\driver\driverController.js
 const Driver = require("../../models/driver/driver");
 const Ride = require("../../models/ride");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { sendNotificationToDriver } = require("../../services/firebaseService");
-
+const { sendNotificationToDriver, sendNotificationToMultipleDrivers } = require("../../services/firebaseService");
 
 const SALT_ROUNDS = 12;
 const JWT_SECRET = process.env.JWT_SECRET || "supersecret";
@@ -105,68 +104,114 @@ const loginDriver = async (req, res) => {
     console.error("❌ Error in loginDriver:", err);
     res.status(500).json({ error: err.message });
   }
-}
+};
 
-
-
+/**
+ * ✅ Update FCM Token
+ */
 const updateFCMToken = async (req, res) => {
   try {
     const { driverId } = req.user;
     const { fcmToken } = req.body;
 
+    console.log(`🔄 Updating FCM token for driver: ${driverId}`);
+    console.log('FCM Token received:', fcmToken ? `${fcmToken.substring(0, 20)}...` : 'NULL');
+
     if (!fcmToken) {
-      return res.status(400).json({ msg: "FCM token is required" });
+      return res.status(400).json({
+        success: false,
+        message: "FCM token is required"
+      });
+    }
+
+    // Validate token format
+    if (fcmToken.length < 50) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid FCM token format"
+      });
     }
 
     const driver = await Driver.findOneAndUpdate(
       { driverId },
-      { fcmToken, lastUpdate: new Date() },
+      { 
+        fcmToken: fcmToken,
+        lastUpdate: new Date(),
+        notificationEnabled: true
+      },
       { new: true }
     );
 
     if (!driver) {
-      return res.status(404).json({ msg: "Driver not found" });
+      return res.status(404).json({ 
+        success: false, 
+        message: "Driver not found" 
+      });
     }
 
     console.log(`✅ FCM token updated for driver: ${driverId}`);
-    res.json({ success: true, message: "FCM token updated successfully" });
-  } catch (err) {
-    console.error("❌ Error updating FCM token:", err);
-    res.status(500).json({ error: err.message });
+
+    res.json({ 
+      success: true, 
+      message: "FCM token updated successfully",
+      driverId: driver.driverId,
+      tokenUpdated: true
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating FCM token:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Failed to update FCM token",
+      error: error.message 
+    });
   }
 };
 
-
-
-
+/**
+ * ✅ Send test notification to specific driver
+ */
 const sendTestNotification = async (req, res) => {
   try {
     const { driverId } = req.user;
+    
+    const driver = await Driver.findOne({ driverId });
+    if (!driver || !driver.fcmToken) {
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found or no FCM token"
+      });
+    }
 
-    const success = await sendNotificationToDriver(
-      driverId,
-      "🔔 Test Notification",
-      "This is a test notification from EazyGo Driver App",
-      {
-        type: "test",
-        driverId: driverId,
-        timestamp: new Date().toISOString()
-      }
+    const testData = {
+      type: "test_notification",
+      message: "This is a test notification from backend",
+      timestamp: new Date().toISOString(),
+      driverId: driverId
+    };
+
+    const result = await sendNotificationToMultipleDrivers(
+      [driver.fcmToken],
+      "🧪 Test Notification",
+      "This is a test notification from your backend server",
+      testData
     );
 
-    if (success) {
-      res.json({ success: true, message: "Test notification sent successfully" });
-    } else {
-      res.status(500).json({ success: false, message: "Failed to send test notification" });
-    }
-  } catch (err) {
-    console.error("❌ Error sending test notification:", err);
-    res.status(500).json({ error: err.message });
+    res.json({
+      success: true,
+      message: `Test notification sent: ${result.successCount} success, ${result.failureCount} failed`,
+      result: result,
+      driverToken: `${driver.fcmToken.substring(0, 20)}...`
+    });
+
+  } catch (error) {
+    console.error('❌ Error sending test notification:', error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to send test notification"
+    });
   }
 };
-
-
-
 
 /**
  * ✅ Change password
@@ -421,6 +466,7 @@ const updateRideStatus = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
 module.exports = {
   createDriver,
   loginDriver,
@@ -433,6 +479,6 @@ module.exports = {
   getNearestDrivers,
   logoutDriver,
   getRideById,
-  updateFCMToken,        // ✅ Add this
-  sendTestNotification,  // ✅ Add this
+  updateFCMToken,
+  sendTestNotification,
 };

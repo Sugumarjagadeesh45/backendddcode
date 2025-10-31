@@ -1,154 +1,134 @@
+// services/firebaseService.js
 const admin = require('firebase-admin');
 
-// Initialize Firebase Admin
 let firebaseInitialized = false;
 
 const initializeFirebase = () => {
+  if (firebaseInitialized) {
+    console.log('✅ Firebase already initialized');
+    return;
+  }
+
   try {
-    if (!firebaseInitialized) {
-      // For development/testing, you can use the service account from environment variables
-      // Or create a service account key file from Firebase Console
-      
-      // Method 1: Using environment variables (recommended for production)
-      if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY) {
+    // Check if Firebase app already exists
+    if (admin.apps.length > 0) {
+      console.log('✅ Firebase app already exists');
+      firebaseInitialized = true;
+      return;
+    }
+
+    // Method 1: Try with service account from environment
+    if (process.env.FIREBASE_PRIVATE_KEY) {
+      try {
         const serviceAccount = {
-          type: "service_account",
+          type: process.env.FIREBASE_TYPE || 'service_account',
           project_id: process.env.FIREBASE_PROJECT_ID,
           private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-          private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+          private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
           client_email: process.env.FIREBASE_CLIENT_EMAIL,
           client_id: process.env.FIREBASE_CLIENT_ID,
-          auth_uri: "https://accounts.google.com/o/oauth2/auth",
-          token_uri: "https://oauth2.googleapis.com/token",
-          auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-          client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
-          universe_domain: "googleapis.com"
+          auth_uri: process.env.FIREBASE_AUTH_URI || 'https://accounts.google.com/o/oauth2/auth',
+          token_uri: process.env.FIREBASE_TOKEN_URI || 'https://oauth2.googleapis.com/token',
+          auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_CERT_URL || 'https://www.googleapis.com/oauth2/v1/certs',
+          client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL
         };
 
         admin.initializeApp({
           credential: admin.credential.cert(serviceAccount)
         });
-      } else {
-        // Method 2: Using default configuration (for development)
-        console.log('⚠️ Using default Firebase configuration');
-        admin.initializeApp();
-      }
 
-      firebaseInitialized = true;
-      console.log('✅ Firebase Admin initialized successfully');
+        firebaseInitialized = true;
+        console.log('✅ Firebase Admin initialized with service account');
+        return;
+      } catch (serviceAccountError) {
+        console.log('❌ Service account initialization failed, trying alternative...');
+      }
     }
+
+    // Method 2: Try with application default credentials
+    try {
+      admin.initializeApp({
+        credential: admin.credential.applicationDefault()
+      });
+      firebaseInitialized = true;
+      console.log('✅ Firebase Admin initialized with application default credentials');
+    } catch (defaultError) {
+      console.error('❌ Application default credentials also failed');
+      throw defaultError;
+    }
+    
   } catch (error) {
     console.error('❌ Firebase Admin initialization failed:', error);
+    throw error;
   }
 };
 
-// Send notification to driver
-const sendNotificationToDriver = async (driverId, title, body, data = {}) => {
+const sendNotificationToMultipleDrivers = async (driverTokens, title, body, data = {}) => {
   try {
-    if (!firebaseInitialized) {
-      initializeFirebase();
+    // Ensure Firebase is initialized
+    initializeFirebase();
+
+    if (!driverTokens || driverTokens.length === 0) {
+      throw new Error('No driver tokens provided');
     }
 
-    // Get driver's FCM token from database
-    const Driver = require('../models/driver/driver');
-    const driver = await Driver.findOne({ driverId });
-    
-    if (!driver || !driver.fcmToken) {
-      console.log(`❌ Driver ${driverId} not found or no FCM token`);
-      return false;
+    // Filter valid tokens
+    const validTokens = driverTokens.filter(token => 
+      token && 
+      token !== 'YOUR_ACTUAL_FCM_TOKEN_FROM_APP' && 
+      token.length > 50 &&
+      token.startsWith('f')
+    );
+
+    if (validTokens.length === 0) {
+      console.log('❌ No valid FCM tokens found');
+      return {
+        successCount: 0,
+        failureCount: driverTokens.length,
+        error: 'No valid FCM tokens provided'
+      };
     }
 
     const message = {
-      token: driver.fcmToken,
       notification: {
         title: title,
-        body: body,
+        body: body
       },
-      data: {
-        ...data,
-        click_action: 'FLUTTER_NOTIFICATION_CLICK',
-        sound: 'default'
-      },
+      data: data,
+      tokens: validTokens,
       android: {
-        priority: 'high',
-        notification: {
-          channelId: 'high_priority_channel',
-          sound: 'default',
-          vibrateTimings: [0, 500, 500, 500],
-          priority: 'max',
-          defaultSound: true,
-        },
+        priority: 'high'
       },
       apns: {
         payload: {
           aps: {
             sound: 'default',
-            badge: 1,
-          },
-        },
-      },
-    };
-
-    const response = await admin.messaging().send(message);
-    console.log(`✅ Notification sent to driver ${driverId}:`, response);
-    return true;
-  } catch (error) {
-    console.error(`❌ Error sending notification to driver ${driverId}:`, error);
-    return false;
-  }
-};
-
-// Send notification to multiple drivers
-const sendNotificationToMultipleDrivers = async (driverIds, title, body, data = {}) => {
-  try {
-    if (!firebaseInitialized) {
-      initializeFirebase();
-    }
-
-    const Driver = require('../models/driver/driver');
-    const drivers = await Driver.find({ driverId: { $in: driverIds } });
-    
-    const validTokens = drivers
-      .filter(driver => driver.fcmToken)
-      .map(driver => driver.fcmToken);
-
-    if (validTokens.length === 0) {
-      console.log('❌ No valid FCM tokens found for drivers');
-      return false;
-    }
-
-    const message = {
-      tokens: validTokens,
-      notification: {
-        title: title,
-        body: body,
-      },
-      data: {
-        ...data,
-        click_action: 'FLUTTER_NOTIFICATION_CLICK',
-        sound: 'default'
-      },
-      android: {
-        priority: 'high',
-        notification: {
-          channelId: 'high_priority_channel',
-          sound: 'default',
-          vibrateTimings: [0, 500, 500, 500],
-        },
-      },
+            badge: 1
+          }
+        }
+      }
     };
 
     const response = await admin.messaging().sendEachForMulticast(message);
-    console.log(`✅ Notifications sent to ${response.successCount} drivers`);
-    return response;
+    
+    console.log('📧 FCM Response:', {
+      successCount: response.successCount,
+      failureCount: response.failureCount
+    });
+
+    return {
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      responses: response.responses
+    };
+
   } catch (error) {
-    console.error('❌ Error sending notifications to multiple drivers:', error);
-    return false;
+    console.error('❌ Error sending FCM notifications:', error);
+    throw error;
   }
 };
 
 module.exports = {
   initializeFirebase,
-  sendNotificationToDriver,
   sendNotificationToMultipleDrivers
 };

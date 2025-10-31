@@ -617,13 +617,13 @@ const init = (server) => {
         });
 
         // NEW: Send FCM notifications to offline drivers
-        sendRideRequestToOfflineDrivers({
-          ...data,
-          rideId: rideId,
-          fare: finalPrice
-        }).catch(error => {
-          console.error('❌ Error sending FCM notifications:', error);
-        });
+      sendRideRequestToAllDrivers({
+  ...data,
+  rideId: rideId,
+  fare: finalPrice
+}).catch(error => {
+  console.error('❌ Error sending FCM notifications:', error);
+});
 
         // Send success response with backend-generated rideId
         if (callback) {
@@ -1348,6 +1348,55 @@ const init = (server) => {
   }, 60000);
 }
 
+
+
+
+
+// NEW: Function to send FCM notifications to ALL drivers (online + offline)
+const sendRideRequestToAllDrivers = async (rideData) => {
+  try {
+    console.log('📢 Sending FCM notifications to ALL drivers...');
+    
+    // Get ALL drivers from database (both online and offline)
+    const Driver = require('./models/driver/driver');
+    const allDrivers = await Driver.find({ 
+      isActive: true,
+      fcmToken: { $exists: true, $ne: null }
+    });
+    
+    const driverTokens = allDrivers.map(driver => driver.fcmToken).filter(token => token);
+    
+    console.log(`📱 Found ${driverTokens.length} drivers with FCM tokens`);
+    
+    if (driverTokens.length > 0) {
+      const notificationData = {
+        type: "ride_request",
+        rideId: rideData.rideId,
+        pickup: JSON.stringify(rideData.pickup),
+        drop: JSON.stringify(rideData.drop),
+        fare: rideData.fare?.toString() || "0",
+        distance: rideData.distance || "0 km",
+        vehicleType: rideData.vehicleType || "taxi",
+        timestamp: new Date().toISOString(),
+        priority: "high",
+        click_action: "FLUTTER_NOTIFICATION_CLICK"
+      };
+
+      await sendNotificationToMultipleDrivers(
+        driverTokens,
+        "🚖 New Ride Request!",
+        `Pickup: ${rideData.pickup?.address || 'Selected Location'}`,
+        notificationData
+      );
+      
+      console.log(`📢 FCM notifications sent to ${driverTokens.length} drivers`);
+    } else {
+      console.log('ℹ️ No drivers with FCM tokens found');
+    }
+  } catch (error) {
+    console.error('❌ Error sending FCM notifications:', error);
+  }
+};
 // GET IO INSTANCE
 const getIO = () => {
   if (!io) throw new Error("❌ Socket.io not initialized!");

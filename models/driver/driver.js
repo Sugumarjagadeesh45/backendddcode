@@ -13,6 +13,9 @@ const driverSchema = new mongoose.Schema(
       type: { type: String, enum: ["Point"], default: "Point" },
       coordinates: { type: [Number], required: true },
     },
+      fcmToken: { type: String }, // Add this field
+  platform: { type: String }, 
+
     active: { type: Boolean, default: false },
     totalPayment: { type: Number, default: 0 },
     settlement: { type: Number, default: 0 },
@@ -33,6 +36,7 @@ const driverSchema = new mongoose.Schema(
 
 // ✅ Add 2dsphere index
 driverSchema.index({ location: "2dsphere" });
+
 
 module.exports = mongoose.model("Driver", driverSchema);
 

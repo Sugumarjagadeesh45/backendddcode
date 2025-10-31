@@ -104,6 +104,59 @@ router.put("/:driverId", driverController.updateDriver);
 router.delete("/:driverId", driverController.deleteDriver);
 router.post("/logout", driverController.logoutDriver);
 
+router.post('/update-fcm-token', async (req, res) => {
+  try {
+    const { driverId, fcmToken, platform } = req.body;
+
+    if (!driverId || !fcmToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver ID and FCM token are required'
+      });
+    }
+
+    // Validate FCM token format
+    if (!fcmToken.startsWith('f') || fcmToken.length < 50) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid FCM token format'
+      });
+    }
+
+    // Update driver's FCM token in database
+    const driver = await Driver.findOne({ driverId });
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    // Update FCM token
+    driver.fcmToken = fcmToken;
+    driver.platform = platform;
+    await driver.save();
+
+    console.log(`✅ Updated FCM token for driver ${driverId}`);
+
+    res.json({
+      success: true,
+      message: 'FCM token updated successfully',
+      driverId,
+      tokenUpdated: true
+    });
+
+  } catch (error) {
+    console.error('Error updating FCM token:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update FCM token',
+      error: error.message
+    });
+  }
+});
+
+
 module.exports = router;
 
 
